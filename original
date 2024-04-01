@@ -1,0 +1,97 @@
+// Obtendo o registro da Proposta
+proposta = zoho.crm.getRecordById("Quotes",propostaId);
+// Obtendo o modelo da proposta
+Modelo = proposta.get("Modelo");
+info "Obtendo o modelo da proposta: " + Modelo;
+if(Modelo == "Renegociação")
+{
+	// Verifica se há um cancelamento selecionado
+	qualCancelamento = proposta.get("Qual_cancelamento");
+	if(!isnull(qualCancelamento))
+	{
+		// Obtendo o ID do cancelamento
+		cancelamentoId = qualCancelamento.get("id");
+		// Obtendo detalhes do cancelamento
+		cancelamento = zoho.crm.getRecordById("Cancelamentos",cancelamentoId);
+		desconto_custo = ifnull(cancelamento.get("Desconto_Custo"),"0.0").toDecimal();
+	}
+	else
+	{
+		// Se não houver cancelamento selecionado, define o desconto do custo como 0
+		desconto_custo = 0.00;
+	}
+	// Obtendo detalhes do produto da proposta
+	produto = ifnull(proposta.get("Product_Details"),"");
+	info "Obtendo detalhes do produto da proposta: " + produto;
+	total_margem = 0.00;
+	quantidade_produtos = 0.00;
+	PRODUTOS = produto.toJSONList();
+	for each  produtoEle in PRODUTOS
+	{
+		produtoId = produtoEle.get("product").get("id");
+		desconto_produto = ifnull(produtoEle.get("Discount"),"0.0").toDecimal();
+		ajuste_proposta = proposta.get("Adjustment").toDecimal();
+		indicacao = proposta.get("Indica_o");
+		desconto_proposta = proposta.get("Discount");
+		total = if(proposta.get("Grand_Total") == 0,1,proposta.get("Grand_Total"));
+		incremental = if(proposta.get("Incremental") == NULL,1,proposta.get("Incremental"));
+		subtotal = proposta.get("Sub_Total");
+		meses_contrato_texto = if(proposta.get("Meses_Contrato") == 'Avulso',1,proposta.get("Meses_Contrato"));
+		meses_contrato = meses_contrato_texto.toNumber();
+		Tipo = proposta.get("Tipo_de_Servi_o");
+		quantidade = ifnull(produtoEle.get("quantity"),"0.0").toLong();
+		// Calculando o custo considerando o desconto do custo do cancelamento
+		productdetails = zoho.crm.getRecordById("Products",produtoId);
+		custo = ifnull(productdetails.get("Custo"),"0.0").toDecimal() - desconto_custo;
+		unitprice = ifnull(produtoEle.get("list_price"),"0.0").toDecimal();
+		unitpricequantity = unitprice * quantidade - desconto_produto;
+		custo_por_quantidade = custo * quantidade;
+		quantidade_produtos = quantidade_produtos + 1;
+		custo_total_reneg = custo;
+		pis_cofins_INC = incremental * 0.0365;
+		iss_INC = incremental * 0.02;
+		irpj_INC = incremental * 0.08;
+		csll_INC = incremental * 0.0288;
+		margem_reneg = (incremental - pis_cofins_INC - iss_INC - irpj_INC - csll_INC - custo_total_reneg) / incremental;
+		/* PERCENTUAL RENEGOCIAÇÃO */
+		if(margem_reneg.round(3) >= 0.50 && Tipo == 'Recorrente' && Modelo == 'Renegociação')
+		{
+			porcentagem_comissao = 0.80;
+		}
+		else if(margem_reneg.round(3) < 0.50 && margem_reneg.round(3) >= 0.47 && Tipo == 'Recorrente' && Modelo == 'Renegociação')
+		{
+			porcentagem_comissao = 0.60;
+		}
+		else if(margem_reneg.round(3) < 0.47 && margem_reneg.round(3) >= 0.42 && Tipo == 'Recorrente' && Modelo == 'Renegociação')
+		{
+			porcentagem_comissao = 0.50;
+		}
+		else if(margem_reneg.round(3) < 0.42 && margem_reneg.round(3) >= 0.40 && Tipo == 'Recorrente' && Modelo == 'Renegociação')
+		{
+			porcentagem_comissao = 0.30;
+		}
+		else if(margem_reneg.round(3) > 0.64 && Tipo == 'Avulso' && Modelo == 'Renegociação')
+		{
+			porcentagem_comissao = 0.08;
+		}
+		else if(margem_reneg.round(3) <= 0.64 && margem_reneg.round(3) > 0.59 && Tipo == 'Avulso' && Modelo == 'Renegociação')
+		{
+			porcentagem_comissao = 0.0625;
+		}
+		else if(margem_reneg.round(3) <= 0.59 && margem_reneg.round(3) >= 0.57 && Tipo == 'Avulso' && Modelo == 'Renegociação')
+		{
+			porcentagem_comissao = 0.02;
+		}
+		else
+		{
+			porcentagem_comissao = 0;
+		}
+		/* VALOR COMISSÃO */
+		comissao_total_ren = porcentagem_comissao * (incremental - iss_INC - pis_cofins_INC - csll_INC - irpj_INC);
+		mp = Map();
+		mp.put("Margem",margem_reneg.round(3));
+		mp.put("Comiss_o",comissao_total_ren.round(2));
+		update = zoho.crm.updateRecord("Quotes",propostaId,mp);
+		info "Atualizando registro da Proposta: " + update;
+	}
+}
